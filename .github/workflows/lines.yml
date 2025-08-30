@@ -2,29 +2,83 @@ name: Update Lines of Code
 
 on:
   schedule:
-    - cron: "0 0 * * 0"   # runs once a week (Sunday midnight UTC)
-  workflow_dispatch:        # allows manual trigger
+    - cron: "0 0 * * 0"   # weekly
+  workflow_dispatch:
 
 jobs:
   count:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # get full history
+          fetch-depth: 0
 
+      # 1) Ensure README with markers exists
+      - name: Ensure README exists with markers
+        shell: bash
+        run: |
+          if [ ! -f README.md ]; then
+            cat > README.md <<'EOF'
+# Hi, I'm G-Professional 👋
+
+### 📊 My GitHub Line Counts
+<!-- LINES-START -->
+_updating soon..._
+<!-- LINES-END -->
+EOF
+          fi
+          # Ensure markers exist even if user removed them
+          if ! grep -q "<!-- LINES-START -->" README.md; then
+            printf "\n### 📊 My GitHub Line Counts\n<!-- LINES-START -->\n_updating soon..._\n<!-- LINES-END -->\n" >> README.md
+          fi
+
+      # 2) Compute added/deleted (this repo)
       - name: Count lines added/deleted
+        shell: bash
         run: |
-          git log --author="${{ github.actor }}" --pretty=tformat: --numstat \
-            | awk '{adds+=$1; dels+=$2} END {printf "added %d\n deleted %d\n net %d\n", adds, dels, adds-dels}' > lines.txt
+          git log --author="${{ github.repository_owner }}" --pretty=tformat: --numstat \
+            | awk 'NF==3 {adds+=$1; dels+=$2} END {printf "added %d\ndeleted %d\nnet %d\n", adds, dels, adds-dels}' \
+            > lines.txt
+          echo "----"
+          cat lines.txt
+          echo "----"
 
-      - name: Update README
+      # 3) Update the marker block (robust awk, no sed -i issues)
+      - name: Update README marker block
+        shell: bash
         run: |
-          sed -i '/<!-- LINES-START -->/,/<!-- LINES-END -->/c\<!-- LINES-START -->\n```text\n'$(cat lines.txt)'\n```\n<!-- LINES-END -->' README.md
+          repl="$(printf '%s\n' '```text' "$(cat lines.txt)" '```')"
+          awk -v repl="$repl" '
+            BEGIN { start="<!-- LINES-START -->"; end="<!-- LINES-END -->"; printed=0 }
+            $0 ~ start {
+              print start
+              print repl
+              print end
+              # skip everything until end marker
+              while (getline > 0) { if ($0 ~ end) break }
+              printed=1
+              next
+            }
+            { out = out $0 ORS }
+            END {
+              if (printed) { printf "%s", out }
+              else {
+                # append block if not found
+                printf "%s", out
+                print start
+                print repl
+                print end
+              }
+            }
+          ' README.md > README.md.new
+          mv README.md.new README.md
 
+      # 4) Commit
       - name: Commit changes
+        shell: bash
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git commit -am "Update line stats" || echo "No changes"
+          git add README.md
+          git commit -m "Update line stats" || echo "No changes"
           git push
