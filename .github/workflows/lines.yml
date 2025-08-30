@@ -1,0 +1,30 @@
+name: Update Lines of Code
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"   # runs once a week (Sunday midnight UTC)
+  workflow_dispatch:        # allows manual trigger
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0   # get full history
+
+      - name: Count lines added/deleted
+        run: |
+          git log --author="${{ github.actor }}" --pretty=tformat: --numstat \
+            | awk '{adds+=$1; dels+=$2} END {printf "added %d\n deleted %d\n net %d\n", adds, dels, adds-dels}' > lines.txt
+
+      - name: Update README
+        run: |
+          sed -i '/<!-- LINES-START -->/,/<!-- LINES-END -->/c\<!-- LINES-START -->\n```text\n'$(cat lines.txt)'\n```\n<!-- LINES-END -->' README.md
+
+      - name: Commit changes
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git commit -am "Update line stats" || echo "No changes"
+          git push
