@@ -1,7 +1,7 @@
 name: Update Lines Across All Repos
 
 permissions:
-  contents: write   # allow pushing README updates
+  contents: write
 
 on:
   schedule:
@@ -10,9 +10,9 @@ on:
 
 env:
   OWNER: ${{ github.repository_owner }}
-  # Your identities (from the debug)
-  AUTHOR_REGEX: 'chucacabrawow@gmail.com|Glenn|chucacabrawow'
-  VISIBILITY: public        # public only (no PAT needed)
+  # Add all identities you commit with, separated by |
+  AUTHOR_PATTERNS: 'chucacabrawow@gmail.com|Glenn|chucacabrawow'
+  VISIBILITY: public   # change to "all" if you later use a PAT and want private repos
 
 jobs:
   total:
@@ -34,99 +34,16 @@ jobs:
             printf "\n### 📊 Lines of code across all repos\n<!-- ALL-REPOS-START -->\n_updating..._\n<!-- ALL-REPOS-END -->\n" >> README.md
           fi
 
-      - name: Auth for gh (using default GITHUB_TOKEN)
+      - name: Auth for gh (GITHUB_TOKEN, public repos)
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: gh auth status || true
 
-      - name: List repos
+      - name: List repos (include forks)
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -e
-          # list only non-fork public repos
-          gh repo list "$OWNER" --visibility public --no-archived --json nameWithOwner,isFork \
-            | jq -r '.[] | select(.isFork|not) | .nameWithOwner' > repos.txt
-          echo "Found $(wc -l < repos.txt) repos:"
-          cat repos.txt
-
-      - name: Count lines per repo (git log by AUTHOR_REGEX)
-        shell: bash
-        env:
-          AUTHOR_REGEX: ${{ env.AUTHOR_REGEX }}
-        run: |
-          set -euo pipefail
-          echo "repo,added,deleted,net" > summary.csv
-          total_add=0
-          total_del=0
-
-          while IFS= read -r repo; do
-            echo "::group::Processing $repo"
-            if ! git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1; then
-              echo "clone failed: $repo"; echo "::endgroup::"; continue
-            fi
-            cd "$(basename "$repo")"
-
-            # Ensure full history
-            git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
-
-            echo "Debug: commit count for $repo"
-            git log --all --author="${AUTHOR_REGEX}" --pretty=oneline | wc -l
-            
-            # Sum additions/deletions for commits whose author matches AUTHOR_REGEX
-            adds=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" \
-                   | awk 'NF==3 {a+=$1} END {print a+0}')
-            dels=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" \
-                   | awk 'NF==3 {d+=$2} END {print d+0}')
-            cd ..
-
-            net=$((adds - dels))
-            echo "$repo,$adds,$dels,$net" >> summary.csv
-            total_add=$((total_add + adds))
-            total_del=$((total_del + dels))
-            echo "adds=$adds dels=$dels net=$net"
-            echo "::endgroup::"
-          done < repos.txt
-
-          printf "TOTAL,%d,%d,%d\n" "$total_add" "$total_del" "$((total_add-total_del))" >> summary.csv
-
-      - name: Build README block
-        shell: bash
-        run: |
-          {
-            echo '```text'
-            tail -n +2 summary.csv | sort -t, -k4,4nr | awk -F, '
-              BEGIN{
-                printf("%-40s %12s %12s %12s\n","repo","added","deleted","net")
-                printf("%-40s %12s %12s %12s\n","----------------------------------------","------------","------------","------------")
-              }
-              { if ($1=="TOTAL") next; printf("%-40s %12d %12d %12d\n",$1,$2,$3,$4) }
-            '
-            t=$(grep '^TOTAL,' summary.csv | tail -1)
-            IFS=',' read -r _ ta td tn <<<"$t"
-            echo
-            printf "%-40s %12d %12d %12d\n" "GRAND TOTAL" "$ta" "$td" "$tn"
-            echo '```'
-          } > block.txt
-
-      - name: Update README block
-        shell: bash
-        run: |
-          awk -v repl="$(sed 's/[&/\]/\\&/g' block.txt | tr '\n' '\r')" '
-            BEGIN{ start="<!-- ALL-REPOS-START -->"; end="<!-- ALL-REPOS-END -->" }
-            $0 ~ start { print; print gensub(/\r/,"\n","g",repl); skip=1; next }
-            $0 ~ end   { print; skip=0; next }
-            !skip      { print }
-          ' README.md > README.md.new
-          mv README.md.new README.md
-
-      - name: Commit changes
-        shell: bash
-        run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add README.md summary.csv block.txt
-          git commit -m "Update all-repos line stats" || echo "No changes"
-          git push
+          # list ALL public repos (forks inc
