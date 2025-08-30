@@ -10,10 +10,10 @@ on:
 
 env:
   OWNER: ${{ github.repository_owner }}
-  # Your identities (from the debug you ran)
+  # Your identities (from the debug)
   AUTHOR_REGEX: '(?i)chucacabrawow@gmail\.com|glenn|chucacabrawow'
   # public = only public repos (default token OK)
-  # all    = public + private (requires PAT secret REPOS_TOKEN)
+  # all    = public + private (needs PAT secret REPOS_TOKEN)
   VISIBILITY: public
 
 jobs:
@@ -38,37 +38,4 @@ jobs:
 
       - name: Auth for gh
         env:
-          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
-        shell: bash
-        run: gh auth status || true
-
-      - name: List repos
-        id: list
-        env:
-          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
-        shell: bash
-        run: |
-          set -e
-          if [ "$VISIBILITY" = "all" ]; then scope="--visibility all"; else scope="--visibility public"; fi
-          gh repo list "$OWNER" $scope --no-archived --json nameWithOwner,isFork \
-            | jq -r '.[] | select(.isFork|not) | .nameWithOwner' > repos.txt
-          echo "Found $(wc -l < repos.txt) repos:"
-          cat repos.txt
-
-      - name: Count lines per repo (git log by AUTHOR_REGEX)
-        shell: bash
-        env:
-          AUTHOR_REGEX: ${{ env.AUTHOR_REGEX }}
-        run: |
-          set -euo pipefail
-          echo "repo,added,deleted,net" > summary.csv
-          total_add=0; total_del=0
-
-          while IFS= read -r repo; do
-            echo "::group::Processing $repo"
-            git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
-            cd "$(basename "$repo")"
-            git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
-
-            stats=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" 2>/dev/null \
-              | awk 'NF==3 {a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
+          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token
