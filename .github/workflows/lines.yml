@@ -9,8 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  OWNER: ${{ github.repository_owner }}     # your GitHub login
-  VISIBILITY: public                         # set to "all" to include private (needs PAT)
+  AUTHOR_REGEX: 'chucacabrawow@gmail\.com|Glenn|chucacabrawow'
 
 jobs:
   total:
@@ -53,7 +52,7 @@ jobs:
             git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
             cd "$(basename "$repo")"
             # Top unique author name+email pairs
-            git log --all --format='%an <%ae>' | sort -u | head -n 50
+            git log --all --pretty=tformat: --numstat --author="$AUTHOR_REGEX"
             cd ..
             echo "::endgroup::"
           done < repos.txt
