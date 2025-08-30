@@ -7,63 +7,194 @@ on:
   schedule:
     - cron: "0 0 * * 0"
   workflow_dispatch:
+That’s it—re-run the workflow and the push should succeed.
+
+If you have branch protection on main
+Branch protection can still block direct pushes. Two options:
+
+A) Allow GitHub Actions to bypass
+
+Repo Settings → Branches → your rule
+Enable “Allow GitHub Actions to bypass required pull requests” (or disable “Require PR” for this repo).
+
+B) Use a PR instead of pushing directly
+Replace the commit step with a PR action:
+
+yaml
+Copy code
+- name: Create PR with updated README
+  uses: peter-evans/create-pull-request@v6
+  with:
+    commit-message: Update line stats
+    branch: bot/update-lines
+    title: "Update line stats"
+    body: "Automated update of added/deleted/net lines."
+    labels: automated
+That will open a PR you can merge, even with strict protection.
+
+Want me to drop the PR-based version of the full workflow so it works with protected branches out of the box?
+
+
+
+
+
+
+
+You said:
+okay is there a way to get it to show all lines of code i have submitted across all repositories?
+
+
+ChatGPT said:
+
+Thought for 14s
+Yep—let’s aggregate all your repos and show one number (plus an optional per-repo table) on your profile README.
+
+Below is a drop-in workflow that:
+
+Lists your repos with the GitHub CLI
+
+Clones each repo (shallow fetch → then full history)
+
+Sums adds/deletes for commits authored by you (matches your GitHub noreply emails + your username)
+
+Writes a neat block into your profile README
+
+1) Add this to your profile repo
+Create: .github/workflows/all-repos-lines.yml
+
+yaml
+Copy code
+name: Update Lines Across All Repos
+
+permissions:
+  contents: write   # needed to push README changes
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"   # weekly
+  workflow_dispatch:
+
+env:
+  # You can tweak this to be more specific (add more emails/names separated by |).
+  USERNAME: ${{ github.repository_owner }}
+  AUTHOR_REGEX: '(^|.* )${{ github.repository_owner }}($| .*|@)|${{ github.repository_owner }}@users\.noreply\.github\.com|[0-9]+\+${{ github.repository_owner }}@users\.noreply\.github\.com'
+  # Set to "public" or "all". "all" needs a PAT with repo read access; see step notes below.
+  VISIBILITY: public
 
 jobs:
-  count:
+  total:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 1) Ensure README exists and the marker block is present
-      - name: Ensure README and markers
+      - name: Ensure README markers exist
         shell: bash
         run: |
           if [ ! -f README.md ]; then
-            echo "# Hi, I'm G-Professional 👋" > README.md
+            echo "# Hi, I'm $USERNAME 👋" > README.md
             echo "" >> README.md
           fi
-          if ! grep -q "<!-- LINES-START -->" README.md; then
-            {
-              echo ""
-              echo "### 📊 My GitHub Line Counts"
-              echo "<!-- LINES-START -->"
-              echo "_updating soon..._"
-              echo "<!-- LINES-END -->"
-            } >> README.md
+          for marker in ALL-REPOS-START ALL-REPOS-END; do
+            grep -q "<!-- $marker -->" README.md || echo "<!-- $marker -->" >> README.md
+          done
+          if ! grep -q "<!-- ALL-REPOS-START -->" README.md; then
+            printf "\n### 📊 Lines of code across all repos\n<!-- ALL-REPOS-START -->\n_updating..._\n<!-- ALL-REPOS-END -->\n" >> README.md
           fi
 
-      # 2) Compute added/deleted for THIS repo (by your username)
-      - name: Count lines added/deleted
+      - name: Configure auth for cloning
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
+        run: |
+          echo "machine github.com login $USERNAME password $GH_TOKEN" > ~/.netrc
+          chmod 600 ~/.netrc
+          git config --global protocol.version 2
+          git config --global --add safe.directory '*'
+          gh auth status || true
+
+      - name: Get repo list
+        id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
+        run: |
+          set -e
+          if [ "$VISIBILITY" = "all" ]; then
+            scope="--visibility all"
+          else
+            scope="--visibility public"
+          fi
+          gh repo list "$USERNAME" $scope --no-archived --json nameWithOwner,isFork \
+            | jq -r '.[] | select(.isFork|not) | .nameWithOwner' > repos.txt
+          echo "Found repos:"
+          cat repos.txt
+
+      - name: Count lines per repo
+        shell: bash
+        env:
+          AUTHOR_REGEX: ${{ env.AUTHOR_REGEX }}
+        run: |
+          echo "repo,added,deleted,net" > summary.csv
+          total_add=0; total_del=0;
+          while IFS= read -r repo; do
+            echo "::group::Processing $repo"
+            git clone --filter=blob:none "https://github.com/$repo.git" 2>/dev/null || { echo "clone failed: $repo"; echo "::endgroup::"; continue; }
+            cd "$(basename "$repo")"
+            # fetch all history (shallow clone was just to speed up)
+            git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
+            # sum adds/deletes for matching author across all refs
+            stats=$(git log --all --pretty=tformat: --numstat --author="$AUTHOR_REGEX" 2>/dev/null \
+              | awk 'NF==3 {a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
+            cd ..
+            adds=$(echo "$stats" | awk '{print $1}')
+            dels=$(echo "$stats" | awk '{print $2}')
+            net=$((adds - dels))
+            echo "$repo,$adds,$dels,$net" >> summary.csv
+            total_add=$((total_add + adds))
+            total_del=$((total_del + dels))
+            echo "adds=$adds dels=$dels net=$net"
+            echo "::endgroup::"
+          done < repos.txt
+          total_net=$((total_add - total_del))
+          printf "TOTAL,%d,%d,%d\n" "$total_add" "$total_del" "$total_net" >> summary.csv
+
+      - name: Build README block
         shell: bash
         run: |
-          git log --author="${{ github.repository_owner }}" --pretty=tformat: --numstat \
-            | awk 'NF==3 {adds+=$1; dels+=$2} END {printf "added %d\ndeleted %d\nnet %d\n", adds, dels, adds-dels}' \
-            > lines.txt
-          echo "----"
-          cat lines.txt
-          echo "----"
+          {
+            echo '```text'
+            tail -n +2 summary.csv | sort -t, -k4,4nr | awk -F, '
+              BEGIN{ printf("%-40s %12s %12s %12s\n","repo","added","deleted","net")
+                     printf("%-40s %12s %12s %12s\n","----------------------------------------","------------","------------","------------") }
+              { if ($1=="TOTAL") next; printf("%-40s %12d %12d %12d\n",$1,$2,$3,$4) }
+            '
+            # totals line
+            t=$(grep '^TOTAL,' summary.csv | tail -1)
+            IFS=',' read -r _ ta td tn <<<"$t"
+            echo
+            printf "%-40s %12d %12d %12d\n" "GRAND TOTAL" "$ta" "$td" "$tn"
+            echo '```'
+          } > block.txt
+          cat block.txt
 
-      # 3) Update the README block between markers (robust AWK; no sed -i)
       - name: Update README block
         shell: bash
         run: |
-          repl="$(printf '%s\n' '```text' "$(cat lines.txt)" '```')"
-          awk -v repl="$repl" '
-            BEGIN { start="<!-- LINES-START -->"; end="<!-- LINES-END -->"; inblock=0 }
-            $0 ~ start { print; print repl; inblock=1; next }
-            $0 ~ end   { print; inblock=0; next }
-            !inblock   { print }
+          awk -v repl="$(sed 's/[&/\]/\\&/g' block.txt | tr '\n' '\r' )" '
+            BEGIN{ start="<!-- ALL-REPOS-START -->"; end="<!-- ALL-REPOS-END -->" }
+            $0 ~ start { print; print gensub(/\r/,"\n","g",repl); skip=1; next }
+            $0 ~ end   { print; skip=0; next }
+            !skip      { print }
           ' README.md > README.md.new
           mv README.md.new README.md
 
-      # 4) Commit the change
       - name: Commit changes
         shell: bash
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add README.md
-          git commit -m "Update line stats" || echo "No changes"
+          git add README.md summary.csv block.txt
+          git commit -m "Update all-repos line stats" || echo "No changes"
           git push
