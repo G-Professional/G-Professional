@@ -1,7 +1,3 @@
-# Hi, I'm G-Professional 👋
-
-### 📊 Lines of code across all repos
-<!-- ALL-REPOS-START -->
 ```text
 repo                                            added      deleted          net
 ---------------------------------------- ------------ ------------ ------------
@@ -14,14 +10,3 @@ G-Professional/delta-wye                            0            0            0
 
 GRAND TOTAL                                         0            0            0
 ```
-
-<!-- ALL-REPOS-END -->
-
-### 📊 My GitHub Line Counts
-<!-- LINES-START -->
-```text
-added 0
-deleted 0
-net 0
-```
-<!-- LINES-END -->
