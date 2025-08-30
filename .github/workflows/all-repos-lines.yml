@@ -11,7 +11,7 @@ on:
 env:
   OWNER: ${{ github.repository_owner }}
   # Your identities (from the debug)
-  AUTHOR_REGEX: '(?i)chucacabrawow@gmail\.com|glenn|chucacabrawow'
+  AUTHOR_REGEX: 'chucacabrawow@gmail.com|Glenn|chucacabrawow'
   VISIBILITY: public        # public only (no PAT needed)
 
 jobs:
@@ -72,10 +72,13 @@ jobs:
             # Ensure full history
             git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
 
+            echo "Debug: commit count for $repo"
+            git log --all --author="${AUTHOR_REGEX}" --pretty=oneline | wc -l
+            
             # Sum additions/deletions for commits whose author matches AUTHOR_REGEX
-            adds=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" 2>/dev/null \
+            adds=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" \
                    | awk 'NF==3 {a+=$1} END {print a+0}')
-            dels=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" 2>/dev/null \
+            dels=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" \
                    | awk 'NF==3 {d+=$2} END {print d+0}')
             cd ..
 
