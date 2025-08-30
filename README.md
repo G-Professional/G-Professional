@@ -1,5 +1,9 @@
-## Hi there 👋
+# Hi, I'm G-Professional 👋
 
+### 📊 My GitHub Line Counts
+<!-- LINES-START -->
+_updating soon..._
+<!-- LINES-END -->
 <!--
 **G-Professional/G-Professional** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
