@@ -1,0 +1,122 @@
+name: Update Lines Across All Repos
+
+permissions:
+  contents: write   # allow pushing README updates
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"   # weekly
+  workflow_dispatch:
+
+# === Configure me ===
+env:
+  OWNER: ${{ github.repository_owner }}
+  # Match YOUR commit identities (from the debug you ran)
+  AUTHOR_REGEX: '(?i)chucacabrawow@gmail\.com|glenn|chucacabrawow'
+  # public = only public repos (works with default GITHUB_TOKEN)
+  # all    = public + private (requires PAT in secret REPOS_TOKEN)
+  VISIBILITY: public
+
+jobs:
+  total:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure README block exists
+        shell: bash
+        run: |
+          if [ ! -f README.md ]; then
+            echo "# Hi, I'm $OWNER 👋" > README.md
+            echo "" >> README.md
+          fi
+          if ! grep -q "<!-- ALL-REPOS-START -->" README.md; then
+            printf "\n### 📊 Lines of code across all repos\n<!-- ALL-REPOS-START -->\n_updating..._\n<!-- ALL-REPOS-END -->\n" >> README.md
+          fi
+
+      - name: Auth for gh
+        env:
+          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
+        run: gh auth status || true
+
+      - name: List repos
+        id: list
+        env:
+          GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
+        shell: bash
+        run: |
+          set -e
+          if [ "$VISIBILITY" = "all" ]; then scope="--visibility all"; else scope="--visibility public"; fi
+          gh repo list "$OWNER" $scope --no-archived --json nameWithOwner,isFork \
+            | jq -r '.[] | select(.isFork|not) | .nameWithOwner' > repos.txt
+          echo "Found $(wc -l < repos.txt) repos:"
+          cat repos.txt
+
+      # Optional: see which author strings exist (handy for troubleshooting)
+      # - name: Show distinct authors per repo (debug)
+      #   shell: bash
+      #   run: |
+      #     while read -r repo; do
+      #       echo "::group::Authors in $repo"
+      #       git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
+      #       cd "$(basename "$repo")"
+      #       git log --all --format='%an <%ae>' | sort -u | head -n 50
+      #       cd ..
+      #       echo "::endgroup::"
+      #     done < repos.txt
+
+      - name: Count lines per repo (git log by AUTHOR_REGEX)
+        shell: bash
+        env:
+          AUTHOR_REGEX: ${{ env.AUTHOR_REGEX }}
+        run: |
+          echo "repo,added,deleted,net" > summary.csv
+          total_add=0; total_del=0
+
+          while IFS= read -r repo; do
+            echo "::group::Processing $repo"
+            git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
+            cd "$(basename "$repo")"
+            # ensure full history
+            git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
+
+            # Sum additions/deletions for commits whose author matches AUTHOR_REGEX
+            stats=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" 2>/dev/null \
+              | awk 'NF==3 {a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
+
+            cd ..
+            adds=$(echo "$stats" | awk '{print $1}')
+            dels=$(echo "$stats" | awk '{print $2}')
+            net=$((adds - dels))
+            echo "$repo,$adds,$dels,$net" >> summary.csv
+            total_add=$((total_add + adds))
+            total_del=$((total_del + dels))
+            echo "adds=$adds dels=$dels net=$net"
+            echo "::endgroup::"
+          done < repos.txt
+
+          printf "TOTAL,%d,%d,%d\n" "$total_add" "$total_del" "$((total_add-total_del))" >> summary.csv
+
+      - name: Build README block
+        shell: bash
+        run: |
+          {
+            echo '```text'
+            tail -n +2 summary.csv | sort -t, -k4,4nr | awk -F, '
+              BEGIN{
+                printf("%-40s %12s %12s %12s\n","repo","added","deleted","net")
+                printf("%-40s %12s %12s %12s\n","----------------------------------------","------------","------------","------------")
+              }
+              { if ($1=="TOTAL") next; printf("%-40s %12d %12d %12d\n",$1,$2,$3,$4) }
+            '
+            t=$(grep '^TOTAL,' summary.csv | tail -1)
+            IFS=',' read -r _ ta td tn <<<"$t"
+            echo
+            printf "%-40s %12d %12d %12d\n" "GRAND TOTAL" "$ta" "$td" "$tn"
+            echo '```'
+          } > block.txt
+          cat block.txt
+
+      - name: Upd
