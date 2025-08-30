@@ -1,8 +1,11 @@
 name: Update Lines of Code
 
+permissions:
+  contents: write   # <-- allow push
+
 on:
   schedule:
-    - cron: "0 0 * * 0"   # weekly
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
 jobs:
