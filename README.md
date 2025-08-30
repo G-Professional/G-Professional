@@ -1,15 +1,10 @@
 # Hi, I'm G-Professional 👋
 
-### 📊 My GitHub Line Counts
-<!-- LINES-START -->
-```text
-added 0
-deleted 0
-net 0
-```
-<!-- LINES-END -->
-<!--
-**G-Professional/G-Professional** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+### 📊 Lines of code across all repos
+<!-- ALL-REPOS-START -->
+_updating..._
+<!-- ALL-REPOS-END -->
+
 
 Here are some ideas to get you started:
 
