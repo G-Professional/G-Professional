@@ -17,3 +17,12 @@ Here are some ideas to get you started:
 - 😄 Pronouns: ...
 - ⚡ Fun fact: ...
 -->
+
+### 📊 My GitHub Line Counts
+<!-- LINES-START -->
+```text
+added 0
+deleted 0
+net 0
+```
+<!-- LINES-END -->
