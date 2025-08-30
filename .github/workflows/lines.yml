@@ -45,6 +45,19 @@ jobs:
             | jq -r '.[] | select(.isFork|not) | .nameWithOwner' > repos.txt
           echo "Found $(wc -l < repos.txt) repos"
 
+      - name: Show distinct authors per repo (debug)
+        shell: bash
+        run: |
+          while read -r repo; do
+            echo "::group::Authors in $repo"
+            git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
+            cd "$(basename "$repo")"
+            # Top unique author name+email pairs
+            git log --all --format='%an <%ae>' | sort -u | head -n 50
+            cd ..
+            echo "::endgroup::"
+          done < repos.txt
+      
       - name: Fetch contributor stats via API and sum
         env:
           GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
