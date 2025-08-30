@@ -8,20 +8,20 @@ on:
     - cron: "0 0 * * 0"   # weekly
   workflow_dispatch:
 
-# === Configure me ===
 env:
   OWNER: ${{ github.repository_owner }}
-  # Match YOUR commit identities (from the debug you ran)
+  # Match YOUR identities (from your logs)
   AUTHOR_REGEX: '(?i)chucacabrawow@gmail\.com|glenn|chucacabrawow'
-  # public = only public repos (works with default GITHUB_TOKEN)
-  # all    = public + private (requires PAT in secret REPOS_TOKEN)
+  # public = only public repos (default token OK)
+  # all    = public + private (requires PAT secret REPOS_TOKEN)
   VISIBILITY: public
 
 jobs:
   total:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout profile repo
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -39,6 +39,7 @@ jobs:
       - name: Auth for gh
         env:
           GH_TOKEN: ${{ secrets.REPOS_TOKEN || github.token }}
+        shell: bash
         run: gh auth status || true
 
       - name: List repos
@@ -54,19 +55,6 @@ jobs:
           echo "Found $(wc -l < repos.txt) repos:"
           cat repos.txt
 
-      # Optional: see which author strings exist (handy for troubleshooting)
-      # - name: Show distinct authors per repo (debug)
-      #   shell: bash
-      #   run: |
-      #     while read -r repo; do
-      #       echo "::group::Authors in $repo"
-      #       git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
-      #       cd "$(basename "$repo")"
-      #       git log --all --format='%an <%ae>' | sort -u | head -n 50
-      #       cd ..
-      #       echo "::endgroup::"
-      #     done < repos.txt
-
       - name: Count lines per repo (git log by AUTHOR_REGEX)
         shell: bash
         env:
@@ -79,10 +67,8 @@ jobs:
             echo "::group::Processing $repo"
             git clone --filter=blob:none "https://github.com/$repo.git" >/dev/null 2>&1 || { echo "clone failed"; echo "::endgroup::"; continue; }
             cd "$(basename "$repo")"
-            # ensure full history
             git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --all --tags
 
-            # Sum additions/deletions for commits whose author matches AUTHOR_REGEX
             stats=$(git log --all --pretty=tformat: --numstat --author="${AUTHOR_REGEX}" 2>/dev/null \
               | awk 'NF==3 {a+=$1; d+=$2} END {printf "%d %d", a+0, d+0}')
 
@@ -108,15 +94,3 @@ jobs:
               BEGIN{
                 printf("%-40s %12s %12s %12s\n","repo","added","deleted","net")
                 printf("%-40s %12s %12s %12s\n","----------------------------------------","------------","------------","------------")
-              }
-              { if ($1=="TOTAL") next; printf("%-40s %12d %12d %12d\n",$1,$2,$3,$4) }
-            '
-            t=$(grep '^TOTAL,' summary.csv | tail -1)
-            IFS=',' read -r _ ta td tn <<<"$t"
-            echo
-            printf "%-40s %12d %12d %12d\n" "GRAND TOTAL" "$ta" "$td" "$tn"
-            echo '```'
-          } > block.txt
-          cat block.txt
-
-      - name: Upd
